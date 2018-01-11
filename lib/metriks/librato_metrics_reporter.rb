@@ -120,7 +120,7 @@ module Metriks
           datapoint(name, metric.count, time, :summarize_function => 'average')
         when Metriks::Gauge
           datapoint(name, metric.value, time, :summarize_function => 'average')
-        when Metriks::Histogram, Metriks::Timer, Metriks::UtilizationTimer
+        when Metriks::Histogram, Metriks::HdrHistogram, Metriks::Timer, Metriks::UtilizationTimer
           if Metriks::UtilizationTimer === metric || Metriks::Timer === metric
             count = metric.count
             datapoint(name, count - @last[name], time, :display_min => 0,
