@@ -145,6 +145,8 @@ module Metriks
               snapshot.value(percentile), time, :display_min => 0,
               :summarize_function => 'max')
           end
+
+          metric.flush_histogram if metric.respond_to?(:flush_histogram)
         end
       end
 
