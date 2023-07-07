@@ -1,3 +1,5 @@
+# frozen_string_literal: true
+
 require 'metriks/time_tracker'
 require 'net/https'
 
@@ -22,22 +24,16 @@ module Metriks
       @data = {}
       @sent = {}
 
-      @last = Hash.new { |h,k| h[k] = 0 }
+      @last = Hash.new { |h, k| h[k] = 0 }
 
-      if options[:percentiles]
-        @percentiles = options[:percentiles]
-      else
-        @percentiles = [ 0.95, 0.999 ]
-      end
+      @percentiles = options[:percentiles] || [0.95, 0.999]
 
       @mutex = Mutex.new
       @running = false
     end
 
     def start
-      if @thread && @thread.alive?
-        return
-      end
+      return if @thread&.alive?
 
       @running = true
       @thread = Thread.new do
@@ -54,10 +50,10 @@ module Metriks
     def stop
       @running = false
 
-      if @thread
-        @thread.join
-        @thread = nil
-      end
+      return unless @thread
+
+      @thread.join
+      @thread = nil
     end
 
     def restart
@@ -66,12 +62,14 @@ module Metriks
     end
 
     def flush
+      @mutex.synchronize do
+        write
+      end
+    rescue Exception => e
       begin
-        @mutex.synchronize do
-          write
-        end
-      rescue Exception => ex
-        @on_error[ex] rescue nil
+        @on_error[e]
+      rescue StandardError
+        nil
       end
     end
 
@@ -93,7 +91,7 @@ module Metriks
       http.read_timeout = @timeout
       http.cert_store   = store
 
-      case res = http.start { |http| http.request(req) }
+      case res = http.start { |conn| conn.request(req) }
       when Net::HTTPSuccess, Net::HTTPRedirection
         # OK
       else
@@ -108,77 +106,74 @@ module Metriks
 
       @registry.each do |name, metric|
         next if name.nil? || name.empty?
+
         name = sanitize_name(name)
 
         case metric
         when Metriks::Meter
           count = metric.count
-          datapoint(name, count - @last[name], time, :display_min => 0,
-            :summarize_function => 'sum')
+          datapoint(name, count - @last[name], time, display_min: 0,
+                                                     summarize_function: 'sum')
           @last[name] = count
         when Metriks::Counter
-          datapoint(name, metric.count, time, :summarize_function => 'average')
+          datapoint(name, metric.count, time, summarize_function: 'average')
         when Metriks::Gauge
-          datapoint(name, metric.value, time, :summarize_function => 'average')
+          datapoint(name, metric.value, time, summarize_function: 'average')
         when Metriks::Histogram, Metriks::HdrHistogram, Metriks::Timer, Metriks::UtilizationTimer
-          if Metriks::UtilizationTimer === metric || Metriks::Timer === metric
+          if metric.is_a?(Metriks::UtilizationTimer) || metric.is_a?(Metriks::Timer)
             count = metric.count
-            datapoint(name, count - @last[name], time, :display_min => 0,
-              :summarize_function => 'sum')
+            datapoint(name, count - @last[name], time, display_min: 0,
+                                                       summarize_function: 'sum')
             @last[name] = count
           end
 
-          if Metriks::UtilizationTimer === metric
+          if metric.is_a?(Metriks::UtilizationTimer)
             datapoint("#{name}.one_minute_utilization",
-              metric.one_minute_utilization, time,
-              :display_min => 0, :summarize_function => 'average')
+                      metric.one_minute_utilization, time,
+                      display_min: 0, summarize_function: 'average')
           end
 
           snapshot = metric.snapshot
 
-          datapoint("#{name}.median", snapshot.median, time, :display_min => 0,
-            :summarize_function => 'average')
+          datapoint("#{name}.median", snapshot.median, time, display_min: 0,
+                                                             summarize_function: 'average')
 
           @percentiles.each do |percentile|
             percentile_name = (percentile * 100).to_f.to_s.gsub(/0+$/, '').gsub('.', '')
             datapoint("#{name}.#{percentile_name}th_percentile",
-              snapshot.value(percentile), time, :display_min => 0,
-              :summarize_function => 'max')
+                      snapshot.value(percentile), time, display_min: 0,
+                                                        summarize_function: 'max')
           end
 
           metric.flush_histogram if metric.respond_to?(:flush_histogram)
         end
       end
 
-      if @data.length > 0
-        submit
-      end
+      return unless @data.length.positive?
+
+      submit
     end
 
     def datapoint(name, value, time, attributes = {})
       idx = @data.length
 
-      if prefix
-        name = "#{prefix}.#{name}"
-      end
+      name = "#{prefix}.#{name}" if prefix
 
       @data["gauges[#{idx}][name]"]         = name
       @data["gauges[#{idx}][measure_time]"] = time.to_i
       @data["gauges[#{idx}][value]"]        = value
 
-      unless @source.to_s.empty?
-        @data["gauges[#{idx}][source]"] = @source
-      end
+      @data["gauges[#{idx}][source]"] = @source unless @source.to_s.empty?
 
-      unless @sent[name]
-        @sent[name] = true
+      return if @sent[name]
 
-        @data["gauges[#{idx}][period]"] = @interval
-        @data["gauges[#{idx}][attributes][aggregate]"] = true
+      @sent[name] = true
 
-        attributes.each do |k, v|
-          @data["gauges[#{idx}][attributes][#{k}]"] = v
-        end
+      @data["gauges[#{idx}][period]"] = @interval
+      @data["gauges[#{idx}][attributes][aggregate]"] = true
+
+      attributes.each do |k, v|
+        @data["gauges[#{idx}][attributes][#{k}]"] = v
       end
     end
 
@@ -189,12 +184,12 @@ module Metriks
       when Proc
         sanitized = @sanitizer.call(name)
       else
-        raise RuntimeError, "The :sanitize option must be a replacement " \
-          "string or a Proc that will be passed the metric name to sanitize."
+        raise 'The :sanitize option must be a replacement ' \
+          'string or a Proc that will be passed the metric name to sanitize.'
       end
 
       if sanitized.size > 255 || sanitized =~ /[^.:_\-0-9a-zA-Z]/
-        raise InvalidKeyError, "Librato metric names must match " \
+        raise InvalidKeyError, 'Librato metric names must match ' \
           "/[.:_\-0-9a-zA-Z]+/, and must be less than 255 characters."
       else
         sanitized
@@ -207,14 +202,15 @@ module Metriks
       attr_reader :req, :res, :data
 
       def initialize(req, res, data = nil)
-        @req, @res = req, res
+        @req = req
+        @res = res
         @data = data
+        super
       end
 
       def to_s
-        res.code + ' ' + res.message.dump
+        "#{res.code}  #{res.message.dump}"
       end
     end
-
   end
 end
