@@ -1,5 +1,6 @@
+# frozen_string_literal: true
+
 require 'test/unit'
-require 'pp'
 
 require 'mocha/setup'
 
@@ -8,8 +9,6 @@ require 'metriks'
 Thread.abort_on_exception = true
 
 module ThreadHelper
-  require 'thread'
-
   # Run the given block on n threads in parallel. Returns an array of the
   # return values of each thread's last invocation of block. Options:
 

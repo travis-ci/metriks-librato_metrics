@@ -1,10 +1,12 @@
+# frozen_string_literal: true
+
 require 'test_helper'
 
 require 'metriks/librato_metrics_reporter'
 
 class LibratoMetricsReporterTest < Test::Unit::TestCase
-  def build_reporter(options={})
-    Metriks::LibratoMetricsReporter.new('user', 'password', { :registry => @registry }.merge(options))
+  def build_reporter(options = {})
+    Metriks::LibratoMetricsReporter.new('user', 'password', { registry: @registry }.merge(options))
   end
 
   def setup
@@ -29,8 +31,8 @@ class LibratoMetricsReporterTest < Test::Unit::TestCase
 
     @reporter.write
 
-    @reporter.data.detect { |(k,v)| k =~ /gauges\[\d+\]\[name\]/ && v == 'gauge.testing' } &&
-      @reporter.data.detect { |(k,v)| k =~ /gauges\[\d+\]\[value\]/ && v.to_s == '123' }
+    @reporter.data.detect { |(k, v)| k =~ /gauges\[\d+\]\[name\]/ && v == 'gauge.testing' } &&
+      @reporter.data.detect { |(k, v)| k =~ /gauges\[\d+\]\[value\]/ && v.to_s == '123' }
   end
 
   def test_empty_write
@@ -49,25 +51,25 @@ class LibratoMetricsReporterTest < Test::Unit::TestCase
   end
 
   def test_sanitizes_by_string
-    @reporter = build_reporter(:sanitize => ".")
-    @registry.counter("invalid.ascii?key")
+    @reporter = build_reporter(sanitize: '.')
+    @registry.counter('invalid.ascii?key')
     @reporter.expects(:submit)
     @reporter.write
-    assert_equal(@reporter.data["gauges[0][name]"], "invalid.ascii.key")
+    assert_equal(@reporter.data['gauges[0][name]'], 'invalid.ascii.key')
   end
 
   def test_sanitizes_by_proc
-    @reporter = build_reporter(:sanitize => Proc.new { |key| "bats" })
-    @registry.counter("invalid.ascii?key")
+    @reporter = build_reporter(sanitize: proc { |_key| 'bats' })
+    @registry.counter('invalid.ascii?key')
     @reporter.expects(:submit)
     @reporter.write
-    assert_equal(@reporter.data["gauges[0][name]"], "bats")
+    assert_equal(@reporter.data['gauges[0][name]'], 'bats')
   end
 
   def test_raises_on_invalid_sanitized_key
-    @reporter = build_reporter(:sanitize => Proc.new { |key| "bats" * 100 })
+    @reporter = build_reporter(sanitize: proc { |_key| 'bats' * 100 })
     assert_raise Metriks::LibratoMetricsReporter::InvalidKeyError do
-      @registry.counter("invalid.ascii?key")
+      @registry.counter('invalid.ascii?key')
       @reporter.write
     end
   end
@@ -78,16 +80,16 @@ class LibratoMetricsReporterTest < Test::Unit::TestCase
     @reporter.expects(:submit)
     @reporter.write
 
-    assert @reporter.data.none? { |(k,v)| k =~ /gauges\[\d+\]\[source\]/ }
+    assert(@reporter.data.none? { |(k, _v)| k =~ /gauges\[\d+\]\[source\]/ })
   end
 
   def test_write_with_source_set
-    @reporter = build_reporter(:source => "localhost")
+    @reporter = build_reporter(source: 'localhost')
     @registry.meter('meter.testing').mark
 
     @reporter.expects(:submit)
     @reporter.write
 
-    assert @reporter.data.detect { |(k,v)| k =~ /gauges\[\d+\]\[source\]/ && v == "localhost" }
+    assert(@reporter.data.detect { |(k, v)| k =~ /gauges\[\d+\]\[source\]/ && v == 'localhost' })
   end
 end
